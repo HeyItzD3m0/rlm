@@ -1,0 +1,303 @@
+-- // Services
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- // State
+local autoPickupEnabled = false
+local scriptAlive = true
+local guiVisible = true
+
+-- // Trinkets folder
+local trinketsFolder = Workspace:FindFirstChild("Trinkets")
+if not trinketsFolder then
+    warn("Trinkets folder not found in Workspace.")
+end
+
+-- // Helper functions from second script
+
+local excludedMeshIds = {
+    "5204453430",
+    "923469333"
+}
+
+local excludedPosition = Vector3.new(18050.7656, 395.95459, 37243.8828)
+local tpSafe = CFrame.new(5798.93799, 328.580139, 633.944214)
+
+local function normalizeMeshId(id)
+    return id:match("%d+") or ""
+end
+
+local function isExcludedPosition(position)
+    return position == excludedPosition
+end
+
+local function hasUnionChild(trinket)
+    for _, child in ipairs(trinket:GetChildren()) do
+        if child.Name == "Union" and child:IsA("BasePart") then
+            return true
+        end
+    end
+    return false
+end
+
+local function hasWhiteParticleEmitter(trinket)
+    for _, child in ipairs(trinket:GetDescendants()) do
+        if child:IsA("ParticleEmitter") then
+            for _, keypoint in ipairs(child.Color.Keypoints) do
+                if keypoint.Value == Color3.new(1, 1, 1) then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function hasTwoOrbParticles(trinket)
+    local count = 0
+    for _, descendant in ipairs(trinket:GetDescendants()) do
+        if descendant:IsA("ParticleEmitter") and descendant.Name == "OrbParticle" then
+            count = count + 1
+            if count >= 2 then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function teleportTo(cframe)
+    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hrp = character:WaitForChild("HumanoidRootPart")
+    hrp.CFrame = tpSafe
+    task.wait(0.5)
+    hrp.CFrame = cframe
+end
+
+-- // GUI creation helper function
+
+local function createGui()
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "CombinedGui"
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+    local Frame = Instance.new("Frame")
+    Frame.Name = "MainFrame"
+    Frame.Size = UDim2.new(0, 300, 0, 450)
+    Frame.Position = UDim2.new(0.5, -150, 0.5, -225)
+    Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    Frame.BorderSizePixel = 0
+    Frame.Parent = ScreenGui
+
+    -- Drag functionality
+    local dragging, dragInput, dragStart, startPos
+
+    local function update(input)
+        local delta = input.Position - dragStart
+        Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+
+    Frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = Frame.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    Frame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            update(input)
+        end
+    end)
+
+    -- AutoPickup Toggle Button
+    local ToggleAutoPickup = Instance.new("TextButton")
+    ToggleAutoPickup.Name = "ToggleAutoPickup"
+    ToggleAutoPickup.Size = UDim2.new(0, 130, 0, 30)
+    ToggleAutoPickup.Position = UDim2.new(0, 10, 0, 10)
+    ToggleAutoPickup.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    ToggleAutoPickup.BorderSizePixel = 0
+    ToggleAutoPickup.TextColor3 = Color3.fromRGB(200, 200, 200)
+    ToggleAutoPickup.Font = Enum.Font.SourceSansBold
+    ToggleAutoPickup.TextSize = 18
+    ToggleAutoPickup.Text = "Auto Pickup: OFF"
+    ToggleAutoPickup.Parent = Frame
+
+    -- Delete Button
+    local DeleteButton = Instance.new("TextButton")
+    DeleteButton.Name = "DeleteButton"
+    DeleteButton.Size = UDim2.new(0, 130, 0, 25)
+    DeleteButton.Position = UDim2.new(0, 10, 0, 45)
+    DeleteButton.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+    DeleteButton.BorderSizePixel = 0
+    DeleteButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    DeleteButton.Font = Enum.Font.SourceSansBold
+    DeleteButton.TextSize = 16
+    DeleteButton.Text = "Delete Script"
+    DeleteButton.Parent = Frame
+
+    -- Trinket Teleport Scroll Frame
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(0, 280, 0, 360)
+    scroll.Position = UDim2.new(0, 10, 0, 80)
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scroll.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    scroll.BorderSizePixel = 0
+    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    scroll.ScrollBarThickness = 8
+    scroll.Parent = Frame
+
+    return ScreenGui, ToggleAutoPickup, DeleteButton, scroll
+end
+
+-- // Autopickup function (your original untouched one)
+local function autopickup()
+    if not autoPickupEnabled or not scriptAlive then return end
+
+    local character = LocalPlayer.Character
+    if not character then return end
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    local origin = root.Position
+    if not trinketsFolder then return end
+
+    for _, trinket in pairs(trinketsFolder:GetChildren()) do
+        for _, part in ipairs(trinket:GetDescendants()) do
+            if part:IsA("BasePart") then
+                local cd = part:FindFirstChildOfClass("ClickDetector")
+                if cd then
+                    local dist = (part.Position - origin).Magnitude
+                    if dist <= 25 then
+                        local rayParams = RaycastParams.new()
+                        rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+                        rayParams.FilterDescendantsInstances = {character}
+                        rayParams.IgnoreWater = true
+
+                        local result = Workspace:Raycast(origin, (part.Position - origin).Unit * dist, rayParams)
+
+                        if not result or result.Instance:IsDescendantOf(trinket) then
+                            pcall(function()
+                                fireclickdetector(cd)
+                            end)
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- // Trinket scanning and UI update function (from your second script)
+local function scanAndDisplayTrinkets(scroll)
+    for _, child in ipairs(scroll:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+
+    if not trinketsFolder then return end
+
+    local validTrinkets = {}
+
+    for _, trinket in ipairs(trinketsFolder:GetChildren()) do
+        if trinket:IsA("BasePart") then
+            local meshId = nil
+
+            if trinket:IsA("MeshPart") then
+                meshId = trinket.MeshId
+            else
+                local mesh = trinket:FindFirstChildOfClass("SpecialMesh") or trinket:FindFirstChildOfClass("Mesh")
+                if mesh then meshId = mesh.MeshId end
+            end
+
+            if not table.find(excludedMeshIds, normalizeMeshId(meshId or ""))
+                and not isExcludedPosition(trinket.Position)
+                and not hasWhiteParticleEmitter(trinket)
+                and not hasTwoOrbParticles(trinket)
+                and not hasUnionChild(trinket)
+            then
+                table.insert(validTrinkets, {Name = trinket.Name, CFrame = trinket.CFrame})
+            end
+        end
+    end
+
+    for i, trinket in ipairs(validTrinkets) do
+        local button = Instance.new("TextButton")
+        button.Size = UDim2.new(1, -10, 0, 30)
+        button.Position = UDim2.new(0, 5, 0, (i - 1) * 35)
+        button.Text = trinket.Name .. " (" .. math.floor(trinket.CFrame.X) .. ", " .. math.floor(trinket.CFrame.Y) .. ", " .. math.floor(trinket.CFrame.Z) .. ")"
+        button.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        button.Font = Enum.Font.SourceSans
+        button.TextSize = 14
+        button.Parent = scroll
+
+        button.MouseButton1Click:Connect(function()
+            teleportTo(trinket.CFrame)
+        end)
+    end
+
+    scroll.CanvasSize = UDim2.new(0, 0, 0, #validTrinkets * 35)
+end
+
+-- // Create GUI and get buttons and scroll frame
+local ScreenGui, ToggleAutoPickup, DeleteButton, scroll = createGui()
+
+-- Toggle autopickup button
+ToggleAutoPickup.MouseButton1Click:Connect(function()
+    autoPickupEnabled = not autoPickupEnabled
+    ToggleAutoPickup.Text = "Auto Pickup: " .. (autoPickupEnabled and "ON" or "OFF")
+end)
+
+-- Delete script button
+DeleteButton.MouseButton1Click:Connect(function()
+    scriptAlive = false
+    ScreenGui:Destroy()
+end)
+
+-- // GUI toggle keybind (RightShift)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
+        guiVisible = not guiVisible
+        if ScreenGui then
+            ScreenGui.Enabled = guiVisible
+        end
+    end
+end)
+
+-- // Main loop for autopickup (your original 1 second wait loop)
+task.spawn(function()
+    while scriptAlive do
+        if autoPickupEnabled then
+            autopickup()
+        end
+        task.wait(0.1)
+    end
+end)
+
+-- // Update the trinket list GUI every 5 seconds
+task.spawn(function()
+    while scriptAlive do
+        scanAndDisplayTrinkets(scroll)
+        task.wait(0.5)
+    end
+end)

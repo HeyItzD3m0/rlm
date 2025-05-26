@@ -301,3 +301,169 @@ task.spawn(function()
         task.wait(0.5)
     end
 end)
+
+-- // Trinket ESP with Adjustable Range
+local espEnabled = false
+local espRange = 1000
+local trinketESPConnections = {}
+
+-- Slider and toggle for ESP
+local EspToggle = Instance.new("TextButton")
+EspToggle.Name = "EspToggle"
+EspToggle.Size = UDim2.new(0, 130, 0, 30)
+EspToggle.Position = UDim2.new(0, 150, 0, 10)
+EspToggle.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+EspToggle.BorderSizePixel = 0
+EspToggle.TextColor3 = Color3.fromRGB(200, 200, 200)
+EspToggle.Font = Enum.Font.SourceSansBold
+EspToggle.TextSize = 18
+EspToggle.Text = "ESP: OFF"
+EspToggle.Parent = ToggleAutoPickup.Parent
+
+EspToggle.MouseButton1Click:Connect(function()
+    espEnabled = not espEnabled
+    EspToggle.Text = "ESP: " .. (espEnabled and "ON" or "OFF")
+end)
+
+local EspSlider = Instance.new("TextBox")
+EspSlider.Name = "EspSlider"
+EspSlider.Size = UDim2.new(0, 130, 0, 25)
+EspSlider.Position = UDim2.new(0, 150, 0, 45)
+EspSlider.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+EspSlider.TextColor3 = Color3.fromRGB(255, 255, 255)
+EspSlider.Font = Enum.Font.SourceSans
+EspSlider.TextSize = 14
+EspSlider.Text = tostring(espRange)
+EspSlider.ClearTextOnFocus = false
+EspSlider.Parent = ToggleAutoPickup.Parent
+
+EspSlider.FocusLost:Connect(function()
+    local value = tonumber(EspSlider.Text)
+    if value then
+        espRange = math.clamp(value, 1, 10000)
+    else
+        EspSlider.Text = tostring(espRange)
+    end
+end)
+
+local function clearESP()
+    for _, v in ipairs(trinketESPConnections) do
+        if v.adornment then
+            v.adornment:Destroy()
+        end
+        if v.conn then
+            v.conn:Disconnect()
+        end
+    end
+    table.clear(trinketESPConnections)
+end
+
+local function drawESP()
+    clearESP()
+
+    local character = LocalPlayer.Character
+    if not character then return end
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    local origin = root.Position
+
+    for _, trinket in ipairs(trinketsFolder:GetChildren()) do
+        if trinket:IsA("BasePart") and (trinket.Position - origin).Magnitude <= espRange then
+            local box = Instance.new("BoxHandleAdornment")
+            box.Size = trinket.Size + Vector3.new(0.2, 0.2, 0.2)
+            box.Adornee = trinket
+            box.AlwaysOnTop = true
+            box.ZIndex = 10
+            box.Transparency = 0.4
+            box.Color3 = Color3.new(0, 1, 1)
+            box.Parent = trinket
+
+            table.insert(trinketESPConnections, {
+                adornment = box,
+                conn = trinket.AncestryChanged:Connect(function(_, parent)
+                    if not parent then
+                        box:Destroy()
+                    end
+                end)
+            })
+        end
+    end
+end
+
+-- ESP update loop
+task.spawn(function()
+    while scriptAlive do
+        if espEnabled then
+            drawESP()
+        else
+            clearESP()
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- // Noclip Toggle Setup
+local noclipEnabled = false
+
+-- Noclip button
+local NoclipToggle = Instance.new("TextButton")
+NoclipToggle.Name = "NoclipToggle"
+NoclipToggle.Size = UDim2.new(0, 130, 0, 30)
+NoclipToggle.Position = UDim2.new(0, 150, 0, 80)
+NoclipToggle.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+NoclipToggle.BorderSizePixel = 0
+NoclipToggle.TextColor3 = Color3.fromRGB(200, 200, 200)
+NoclipToggle.Font = Enum.Font.SourceSansBold
+NoclipToggle.TextSize = 18
+NoclipToggle.Text = "Noclip: OFF"
+NoclipToggle.Parent = ToggleAutoPickup.Parent
+
+NoclipToggle.MouseButton1Click:Connect(function()
+    noclipEnabled = not noclipEnabled
+    NoclipToggle.Text = "Noclip: " .. (noclipEnabled and "ON" or "OFF")
+end)
+
+-- Noclip logic loop
+RunService.Stepped:Connect(function()
+    if noclipEnabled and scriptAlive then
+        local character = LocalPlayer.Character
+        if character then
+            for _, part in pairs(character:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end
+end)
+
+-- // Keybinds Setup
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+
+	local key = input.KeyCode
+
+	if key == Enum.KeyCode.P then -- Toggle Auto Pickup (P)
+		autoPickupEnabled = not autoPickupEnabled
+		if ToggleAutoPickup then
+			ToggleAutoPickup.Text = "Auto Pickup: " .. (autoPickupEnabled and "ON" or "OFF")
+		end
+	elseif key == Enum.KeyCode.E then -- Toggle Trinket ESP (E)
+		espEnabled = not espEnabled
+		if EspToggle then
+			EspToggle.Text = "ESP: " .. (espEnabled and "ON" or "OFF")
+		end
+	elseif key == Enum.KeyCode.N then -- Toggle Noclip (N)
+		noclipEnabled = not noclipEnabled
+		if NoclipToggle then
+			NoclipToggle.Text = "Noclip: " .. (noclipEnabled and "ON" or "OFF")
+		end
+	elseif key == Enum.KeyCode.Delete then -- Emergency Kill Switch (Del)
+		scriptAlive = false
+		if ScreenGui then
+			ScreenGui:Destroy()
+		end
+		clearESP()
+	end
+end)
